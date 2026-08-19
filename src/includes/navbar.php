@@ -25,13 +25,25 @@
                 </li>
 
                 <li class="nav-item">
-                    <a class="nav-link" href="#">
+                    <a class="nav-link" href="/products/">
                         Sản phẩm
                     </a>
                 </li>
 
                 <li class="nav-item">
-                    <a class="nav-link" href="#">
+                    <a class="nav-link" href="/employees/">
+                        Nhân viên
+                    </a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="/shippers/">
+                        Người giao hàng
+                    </a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="/orders/">
                         Đơn hàng
                     </a>
                 </li>

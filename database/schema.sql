@@ -91,8 +91,8 @@ CREATE TABLE products (
 
     IsActive BOOLEAN NOT NULL DEFAULT TRUE,
 
-    SupplierID INT,
-    CategoryID INT,
+    SupplierID INT NOT NULL,
+    CategoryID INT NOT NULL,
 
     CONSTRAINT chk_products_price
         CHECK (Price >= 0),
@@ -148,9 +148,9 @@ CREATE TABLE orders (
 
     OrderDate DATE NOT NULL,
 
-    CustomerID INT,
-    EmployeeID INT,
-    ShipperID INT,
+    CustomerID INT NOT NULL,
+    EmployeeID INT NOT NULL,
+    ShipperID INT NOT NULL,
 
     CONSTRAINT fk_orders_customer
         FOREIGN KEY (CustomerID)
