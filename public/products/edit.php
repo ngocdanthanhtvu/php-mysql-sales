@@ -49,6 +49,28 @@ if (!$product) {
 
 
 /*
+ * Lấy danh sách hình ảnh của sản phẩm
+ */
+$sqlImages = "
+    SELECT
+        ProductImageID,
+        ImageFile,
+        AltText,
+        IsPrimary,
+        SortOrder
+    FROM product_images
+    WHERE ProductID = ?
+    ORDER BY SortOrder
+";
+
+$stmtImages = $conn->prepare($sqlImages);
+$stmtImages->bind_param('i', $productID);
+$stmtImages->execute();
+
+$productImages = $stmtImages->get_result();
+
+
+/*
  * Lấy danh sách danh mục
  */
 $sqlCategories = "
@@ -80,92 +102,646 @@ $suppliers = $conn->query($sqlSuppliers);
  * Xử lý khi gửi form
  */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['delete_image'])) {
 
-    $productCode = trim($_POST['product_code'] ?? '');
-    $productName = trim($_POST['product_name'] ?? '');
-    $description = trim($_POST['description'] ?? '');
-    $unit = trim($_POST['unit'] ?? '');
+        $imageID = (int) $_POST['delete_image'];
 
-    $price = (float) ($_POST['price'] ?? 0);
-    $stockQuantity = (int) ($_POST['stock_quantity'] ?? 0);
+        try {
 
-    $categoryID = (int) ($_POST['category_id'] ?? 0);
-    $supplierID = (int) ($_POST['supplier_id'] ?? 0);
+            /*
+            * Lấy thông tin ảnh cần xóa.
+            * Điều kiện ProductID rất quan trọng:
+            * không cho phép xóa ảnh thuộc sản phẩm khác.
+            */
+            $sqlImage = "
+                SELECT
+                    ProductImageID,
+                    ImageFile,
+                    IsPrimary,
+                    SortOrder
+                FROM product_images
+                WHERE ProductImageID = ?
+                AND ProductID = ?
+            ";
 
-    $isActive = isset($_POST['is_active']) ? 1 : 0;
+            $stmtImage = $conn->prepare($sqlImage);
 
+            $stmtImage->bind_param(
+                'ii',
+                $imageID,
+                $productID
+            );
 
-    /*
-     * Kiểm tra dữ liệu
-     */
-    if ($productCode === '') {
+            $stmtImage->execute();
 
-        $error = 'Mã sản phẩm không được để trống.';
+            $resultImage = $stmtImage->get_result();
+            $imageToDelete = $resultImage->fetch_assoc();
 
-    } elseif ($productName === '') {
+            $stmtImage->close();
 
-        $error = 'Tên sản phẩm không được để trống.';
+            if (!$imageToDelete) {
+                throw new Exception(
+                    'Không tìm thấy hình ảnh cần xóa.'
+                );
+            }
 
-    } elseif ($price < 0) {
+            /*
+            * Ở bước kiểm thử đầu tiên,
+            * chưa cho xóa ảnh chính.
+            */
 
-        $error = 'Giá sản phẩm không hợp lệ.';
+            $conn->begin_transaction();
 
-    } elseif ($stockQuantity < 0) {
+            /*
+            * Xóa mẩu tin ảnh.
+            */
+            $sqlDelete = "
+                DELETE FROM product_images
+                WHERE ProductImageID = ?
+                AND ProductID = ?
+            ";
 
-        $error = 'Số lượng tồn kho không hợp lệ.';
+            $stmtDelete = $conn->prepare($sqlDelete);
 
-    } elseif ($categoryID <= 0) {
+            $stmtDelete->bind_param(
+                'ii',
+                $imageID,
+                $productID
+            );
 
-        $error = 'Vui lòng chọn danh mục.';
+            $stmtDelete->execute();
 
-    } elseif ($supplierID <= 0) {
+            if ($stmtDelete->affected_rows !== 1) {
+                throw new Exception(
+                    'Không thể xóa thông tin hình ảnh.'
+                );
+            }
 
-        $error = 'Vui lòng chọn nhà cung cấp.';
+            $stmtDelete->close();
 
-    } else {
+            /*
+            * Nếu ảnh vừa xóa là ảnh chính,
+            * chọn ảnh còn lại có SortOrder nhỏ nhất
+            * làm ảnh chính mới.
+            */
+            if ((int) $imageToDelete['IsPrimary'] === 1) {
 
-        $sql = "
-            UPDATE products
-            SET
-                ProductCode = ?,
-                ProductName = ?,
-                Description = ?,
-                Unit = ?,
-                Price = ?,
-                StockQuantity = ?,
-                IsActive = ?,
-                SupplierID = ?,
-                CategoryID = ?
-            WHERE ProductID = ?
-        ";
+                $sqlNewPrimary = "
+                    UPDATE product_images
+                    SET IsPrimary = 1
+                    WHERE ProductImageID = (
+                        SELECT ProductImageID
+                        FROM (
+                            SELECT ProductImageID
+                            FROM product_images
+                            WHERE ProductID = ?
+                            ORDER BY SortOrder
+                            LIMIT 1
+                        ) AS remaining_images
+                    )
+                ";
 
-        $stmt = $conn->prepare($sql);
+                $stmtNewPrimary =
+                    $conn->prepare($sqlNewPrimary);
 
-        $stmt->bind_param(
-            'ssssdiiiii',
-            $productCode,
-            $productName,
-            $description,
-            $unit,
-            $price,
-            $stockQuantity,
-            $isActive,
-            $supplierID,
-            $categoryID,
-            $productID
-        );
+                $stmtNewPrimary->bind_param(
+                    'i',
+                    $productID
+                );
 
-        if ($stmt->execute()) {
+                $stmtNewPrimary->execute();
+                $stmtNewPrimary->close();
+            }
+            /*
+            * Chuẩn hóa lại SortOrder.
+            *
+            * Ví dụ:
+            * 1 2 3 4 5 6 8
+            *
+            * trở thành:
+            * 1 2 3 4 5 6 7
+            */
+            $deletedSortOrder =
+                (int) $imageToDelete['SortOrder'];
 
-            header('Location: /products/');
+            $sqlSort = "
+                UPDATE product_images
+                SET SortOrder = SortOrder - 1
+                WHERE ProductID = ?
+                AND SortOrder > ?
+            ";
+
+            $stmtSort = $conn->prepare($sqlSort);
+
+            $stmtSort->bind_param(
+                'ii',
+                $productID,
+                $deletedSortOrder
+            );
+
+            $stmtSort->execute();
+            $stmtSort->close();
+
+            $conn->commit();
+
+            /*
+            * Chỉ xóa tập tin vật lý sau khi
+            * database đã COMMIT thành công.
+            */
+            $filePath =
+                '/var/www/html/uploads/products/'
+                . $imageToDelete['ImageFile'];
+
+            if (is_file($filePath)) {
+                unlink($filePath);
+            }
+
+            header(
+                'Location: /products/edit.php?id='
+                . $productID
+                . '&image_deleted=1'
+            );
+
             exit;
+
+        } catch (Throwable $e) {
+
+            /*
+            * Chỉ rollback nếu transaction
+            * đang thực sự hoạt động.
+            */
+            try {
+                $conn->rollback();
+            } catch (Throwable $rollbackError) {
+                // Không cần xử lý thêm.
+            }
+
+            $error = $e->getMessage();
+        }
+    }
+
+    if (isset($_POST['add_images'])) {
+
+        $files = $_FILES['product_images'] ?? null;
+
+        if (
+            !$files
+            || !isset($files['name'])
+            || count($files['name']) === 0
+            || $files['error'][0] === UPLOAD_ERR_NO_FILE
+        ) {
+
+            $error = 'Vui lòng chọn ít nhất một ảnh.';
 
         } else {
 
-            $error = 'Không thể cập nhật sản phẩm.';
+            /*
+            * Thư mục lưu ảnh trong container
+            */
+            $uploadDir =
+                '/var/www/html/uploads/products/';
+
+            /*
+            * Các kiểu ảnh được chấp nhận.
+            * Không dựa vào phần mở rộng do người dùng gửi lên.
+            */
+            $allowedMimeTypes = [
+                'image/jpeg' => 'jpg',
+                'image/png'  => 'png',
+                'image/webp' => 'webp'
+            ];
+
+            /*
+            * Danh sách tập tin đã lưu.
+            * Nếu có lỗi, ta dùng danh sách này để xóa lại.
+            */
+            $uploadedFiles = [];
+
+            try {
+
+                $conn->begin_transaction();
+
+                /*
+                * Tìm SortOrder lớn nhất hiện tại.
+                */
+                $sqlMaxSort = "
+                    SELECT COALESCE(MAX(SortOrder), 0)
+                        AS MaxSortOrder
+                    FROM product_images
+                    WHERE ProductID = ?
+                ";
+
+                $stmtMaxSort =
+                    $conn->prepare($sqlMaxSort);
+
+                $stmtMaxSort->bind_param(
+                    'i',
+                    $productID
+                );
+
+                $stmtMaxSort->execute();
+
+                $maxSortResult =
+                    $stmtMaxSort->get_result();
+
+                $maxSortRow =
+                    $maxSortResult->fetch_assoc();
+
+                $sortOrder =
+                    (int) $maxSortRow['MaxSortOrder'];
+
+                $stmtMaxSort->close();
+
+
+                /*
+                * Chuẩn bị câu INSERT một lần,
+                * sau đó dùng lại cho từng ảnh.
+                */
+                $sqlInsertImage = "
+                    INSERT INTO product_images
+                    (
+                        ProductID,
+                        ImageFile,
+                        AltText,
+                        IsPrimary,
+                        SortOrder
+                    )
+                    VALUES (?, ?, ?, 0, ?)
+                ";
+
+                $stmtInsertImage =
+                    $conn->prepare($sqlInsertImage);
+
+
+                /*
+                * Kiểm tra và lưu từng ảnh.
+                */
+                $fileCount =
+                    count($files['name']);
+
+                for ($i = 0; $i < $fileCount; $i++) {
+
+                    /*
+                    * Kiểm tra lỗi upload.
+                    */
+                    if (
+                        $files['error'][$i]
+                        !== UPLOAD_ERR_OK
+                    ) {
+
+                        throw new Exception(
+                            'Có tập tin tải lên không thành công.'
+                        );
+                    }
+
+
+                    /*
+                    * Kiểm tra MIME type thực tế.
+                    */
+                    $finfo =
+                        new finfo(FILEINFO_MIME_TYPE);
+
+                    $mimeType =
+                        $finfo->file(
+                            $files['tmp_name'][$i]
+                        );
+
+                    if (
+                        !isset(
+                            $allowedMimeTypes[$mimeType]
+                        )
+                    ) {
+
+                        throw new Exception(
+                            'Chỉ chấp nhận ảnh JPG, PNG hoặc WebP.'
+                        );
+                    }
+
+
+                    /*
+                    * Sinh tên tập tin mới.
+                    */
+                    $extension =
+                        $allowedMimeTypes[$mimeType];
+
+                    $newFileName =
+                        'product-'
+                        . bin2hex(random_bytes(8))
+                        . '.'
+                        . $extension;
+
+
+                    /*
+                    * Di chuyển tập tin vào thư mục uploads.
+                    */
+                    $destination =
+                        $uploadDir . $newFileName;
+
+                    if (
+                        !move_uploaded_file(
+                            $files['tmp_name'][$i],
+                            $destination
+                        )
+                    ) {
+
+                        throw new Exception(
+                            'Không thể lưu tập tin ảnh.'
+                        );
+                    }
+
+                    /*
+                    * Ghi nhớ để có thể xóa nếu rollback.
+                    */
+                    $uploadedFiles[] =
+                        $destination;
+
+
+                    /*
+                    * Ảnh mới nằm sau các ảnh hiện có.
+                    */
+                    $sortOrder++;
+
+
+                    /*
+                    * Tạo AltText.
+                    */
+                    $altText =
+                        $product['ProductName']
+                        . ' - ảnh '
+                        . $sortOrder;
+
+
+                    /*
+                    * Ghi thông tin ảnh vào database.
+                    */
+                    $stmtInsertImage->bind_param(
+                        'issi',
+                        $productID,
+                        $newFileName,
+                        $altText,
+                        $sortOrder
+                    );
+
+                    if (
+                        !$stmtInsertImage->execute()
+                    ) {
+
+                        throw new Exception(
+                            'Không thể lưu thông tin ảnh.'
+                        );
+                    }
+                }
+
+                $stmtInsertImage->close();
+
+                /*
+                * Tất cả ảnh đều thành công.
+                */
+                $conn->commit();
+
+                header(
+                    'Location: /products/edit.php?id='
+                    . $productID
+                    . '&images_added=1'
+                );
+
+                exit;
+
+            } catch (Throwable $e) {
+
+                /*
+                * Hủy thay đổi database.
+                */
+                $conn->rollback();
+
+
+                /*
+                * Transaction của MySQL không thể rollback
+                * các tập tin đã ghi xuống ổ đĩa.
+                * Vì vậy phải tự xóa chúng.
+                */
+                foreach (
+                    $uploadedFiles as $uploadedFile
+                ) {
+
+                    if (file_exists($uploadedFile)) {
+                        unlink($uploadedFile);
+                    }
+                }
+
+                $error = $e->getMessage();
+            }
+        }
+    }
+    /*
+     * Trường hợp 1:
+     * Người dùng chọn một ảnh khác làm ảnh chính
+     */
+    if (isset($_POST['set_primary_image'])) {
+        $imageID = (int) $_POST['set_primary_image'];
+
+        try {
+
+            $conn->begin_transaction();
+
+            /*
+             * Bỏ trạng thái ảnh chính của tất cả ảnh
+             * thuộc sản phẩm hiện tại
+             */
+            $sqlResetPrimary = "
+                UPDATE product_images
+                SET IsPrimary = 0
+                WHERE ProductID = ?
+            ";
+
+            $stmtResetPrimary =
+                $conn->prepare($sqlResetPrimary);
+
+            $stmtResetPrimary->bind_param(
+                'i',
+                $productID
+            );
+
+            $stmtResetPrimary->execute();
+
+
+            /*
+             * Đặt ảnh được chọn làm ảnh chính
+             */
+            $sqlSetPrimary = "
+                UPDATE product_images
+                SET IsPrimary = 1
+                WHERE ProductImageID = ?
+                  AND ProductID = ?
+            ";
+
+            $stmtSetPrimary =
+                $conn->prepare($sqlSetPrimary);
+
+            $stmtSetPrimary->bind_param(
+                'ii',
+                $imageID,
+                $productID
+            );
+
+            $stmtSetPrimary->execute();
+
+
+            /*
+             * Nếu không có đúng 1 ảnh được cập nhật
+             * thì xem thao tác là không hợp lệ
+             */
+            if ($stmtSetPrimary->affected_rows !== 1) {
+
+                throw new Exception(
+                    'Ảnh được chọn không hợp lệ.'
+                );
+            }
+
+
+            /*
+             * Cả hai UPDATE đều thành công
+             */
+            $conn->commit();
+
+
+            /*
+             * Redirect về trang sửa sản phẩm
+             * và truyền trạng thái để hiển thị feedback
+             */
+            header(
+                'Location: /products/edit.php?id='
+                . $productID
+                . '&primary_updated=1'
+            );
+
+            exit;
+
+        } catch (Throwable $e) {
+
+            /*
+             * Nếu có lỗi:
+             * khôi phục trạng thái trước transaction
+             */
+            $conn->rollback();
+
+            $error = $e->getMessage();
         }
 
-        $stmt->close();
+    } else {
+
+        /*
+         * Trường hợp 2:
+         * Người dùng cập nhật thông tin sản phẩm
+         */
+
+        $productCode =
+            trim($_POST['product_code'] ?? '');
+
+        $productName =
+            trim($_POST['product_name'] ?? '');
+
+        $description =
+            trim($_POST['description'] ?? '');
+
+        $unit =
+            trim($_POST['unit'] ?? '');
+
+        $price =
+            (float) ($_POST['price'] ?? 0);
+
+        $stockQuantity =
+            (int) ($_POST['stock_quantity'] ?? 0);
+
+        $categoryID =
+            (int) ($_POST['category_id'] ?? 0);
+
+        $supplierID =
+            (int) ($_POST['supplier_id'] ?? 0);
+
+        $isActive =
+            isset($_POST['is_active']) ? 1 : 0;
+
+
+        /*
+         * Kiểm tra dữ liệu
+         */
+        if ($productCode === '') {
+
+            $error =
+                'Mã sản phẩm không được để trống.';
+
+        } elseif ($productName === '') {
+
+            $error =
+                'Tên sản phẩm không được để trống.';
+
+        } elseif ($price < 0) {
+
+            $error =
+                'Giá sản phẩm không hợp lệ.';
+
+        } elseif ($stockQuantity < 0) {
+
+            $error =
+                'Số lượng tồn kho không hợp lệ.';
+
+        } elseif ($categoryID <= 0) {
+
+            $error =
+                'Vui lòng chọn danh mục.';
+
+        } elseif ($supplierID <= 0) {
+
+            $error =
+                'Vui lòng chọn nhà cung cấp.';
+
+        } else {
+
+            $sql = "
+                UPDATE products
+                SET
+                    ProductCode = ?,
+                    ProductName = ?,
+                    Description = ?,
+                    Unit = ?,
+                    Price = ?,
+                    StockQuantity = ?,
+                    IsActive = ?,
+                    SupplierID = ?,
+                    CategoryID = ?
+                WHERE ProductID = ?
+            ";
+
+            $stmt = $conn->prepare($sql);
+
+            $stmt->bind_param(
+                'ssssdiiiii',
+                $productCode,
+                $productName,
+                $description,
+                $unit,
+                $price,
+                $stockQuantity,
+                $isActive,
+                $supplierID,
+                $categoryID,
+                $productID
+            );
+
+            if ($stmt->execute()) {
+
+                header('Location: /products/');
+                exit;
+
+            } else {
+
+                $error =
+                    'Không thể cập nhật sản phẩm.';
+            }
+
+            $stmt->close();
+        }
     }
 }
 
@@ -179,6 +755,41 @@ require_once '/var/www/src/includes/navbar.php';
 
     <h2 class="mb-4">Sửa sản phẩm</h2>
 
+
+    <?php if (
+        isset($_GET['primary_updated'])
+        && $_GET['primary_updated'] === '1'
+    ): ?>
+
+        <div class="alert alert-success">
+            Đã cập nhật ảnh chính thành công.
+        </div>
+
+    <?php endif; ?>
+
+    <?php if (
+        isset($_GET['image_deleted'])
+        && $_GET['image_deleted'] === '1'
+    ): ?>
+
+        <div class="alert alert-success">
+            Đã xóa hình ảnh sản phẩm thành công.
+        </div>
+
+    <?php endif; ?>
+
+
+    <?php if (
+        isset($_GET['images_added'])
+        && $_GET['images_added'] === '1'
+    ): ?>
+
+        <div class="alert alert-success">
+            Đã thêm hình ảnh sản phẩm thành công.
+        </div>
+
+    <?php endif; ?>
+
     <?php if ($error !== ''): ?>
 
         <div class="alert alert-danger">
@@ -188,13 +799,19 @@ require_once '/var/www/src/includes/navbar.php';
     <?php endif; ?>
 
 
-    <form method="post">
+    <form
+        method="post"
+        enctype="multipart/form-data"
+    >
 
         <div class="row">
 
             <div class="col-md-4 mb-3">
 
-                <label for="productCode" class="form-label">
+                <label
+                    for="productCode"
+                    class="form-label"
+                >
                     Mã sản phẩm
                 </label>
 
@@ -215,7 +832,10 @@ require_once '/var/www/src/includes/navbar.php';
 
             <div class="col-md-8 mb-3">
 
-                <label for="productName" class="form-label">
+                <label
+                    for="productName"
+                    class="form-label"
+                >
                     Tên sản phẩm
                 </label>
 
@@ -238,7 +858,10 @@ require_once '/var/www/src/includes/navbar.php';
 
         <div class="mb-3">
 
-            <label for="description" class="form-label">
+            <label
+                for="description"
+                class="form-label"
+            >
                 Mô tả
             </label>
 
@@ -260,7 +883,10 @@ require_once '/var/www/src/includes/navbar.php';
 
             <div class="col-md-4 mb-3">
 
-                <label for="unit" class="form-label">
+                <label
+                    for="unit"
+                    class="form-label"
+                >
                     Đơn vị tính
                 </label>
 
@@ -281,7 +907,10 @@ require_once '/var/www/src/includes/navbar.php';
 
             <div class="col-md-4 mb-3">
 
-                <label for="price" class="form-label">
+                <label
+                    for="price"
+                    class="form-label"
+                >
                     Giá
                 </label>
 
@@ -304,7 +933,10 @@ require_once '/var/www/src/includes/navbar.php';
 
             <div class="col-md-4 mb-3">
 
-                <label for="stockQuantity" class="form-label">
+                <label
+                    for="stockQuantity"
+                    class="form-label"
+                >
                     Tồn kho
                 </label>
 
@@ -330,7 +962,10 @@ require_once '/var/www/src/includes/navbar.php';
 
             <div class="col-md-6 mb-3">
 
-                <label for="categoryID" class="form-label">
+                <label
+                    for="categoryID"
+                    class="form-label"
+                >
                     Danh mục
                 </label>
 
@@ -341,7 +976,10 @@ require_once '/var/www/src/includes/navbar.php';
                     required
                 >
 
-                    <?php while ($category = $categories->fetch_assoc()): ?>
+                    <?php while (
+                        $category =
+                            $categories->fetch_assoc()
+                    ): ?>
 
                         <?php
 
@@ -352,7 +990,9 @@ require_once '/var/www/src/includes/navbar.php';
                         ?>
 
                         <option
-                            value="<?= $category['CategoryID'] ?>"
+                            value="<?=
+                                $category['CategoryID']
+                            ?>"
                             <?= (
                                 $selectedCategoryID
                                 == $category['CategoryID']
@@ -372,7 +1012,10 @@ require_once '/var/www/src/includes/navbar.php';
 
             <div class="col-md-6 mb-3">
 
-                <label for="supplierID" class="form-label">
+                <label
+                    for="supplierID"
+                    class="form-label"
+                >
                     Nhà cung cấp
                 </label>
 
@@ -383,7 +1026,10 @@ require_once '/var/www/src/includes/navbar.php';
                     required
                 >
 
-                    <?php while ($supplier = $suppliers->fetch_assoc()): ?>
+                    <?php while (
+                        $supplier =
+                            $suppliers->fetch_assoc()
+                    ): ?>
 
                         <?php
 
@@ -394,7 +1040,9 @@ require_once '/var/www/src/includes/navbar.php';
                         ?>
 
                         <option
-                            value="<?= $supplier['SupplierID'] ?>"
+                            value="<?=
+                                $supplier['SupplierID']
+                            ?>"
                             <?= (
                                 $selectedSupplierID
                                 == $supplier['SupplierID']
@@ -414,15 +1062,147 @@ require_once '/var/www/src/includes/navbar.php';
         </div>
 
 
+        <div class="mb-4">
+
+            <label class="form-label">
+                Hình ảnh sản phẩm
+            </label>
+
+            <div class="row g-3">
+
+                <?php while (
+                    $image =
+                        $productImages->fetch_assoc()
+                ): ?>
+
+                    <div class="col-md-3">
+
+                        <div class="card h-100">
+
+                            <img
+                                src="/uploads/products/<?=
+                                    htmlspecialchars(
+                                        $image['ImageFile']
+                                    )
+                                ?>"
+                                class="card-img-top"
+                                alt="<?=
+                                    htmlspecialchars(
+                                        $image['AltText']
+                                        ?? ''
+                                    )
+                                ?>"
+                                style="
+                                    height: 160px;
+                                    object-fit: contain;
+                                "
+                            >
+
+                            <div class="card-body">
+
+                                <small class="text-muted">
+                                    Thứ tự:
+                                    <?= $image['SortOrder'] ?>
+                                </small>
+
+                                <div class="mt-2">
+
+                                    <?php if (
+                                        (int) $image['IsPrimary'] === 1
+                                    ): ?>
+
+                                        <span
+                                            class="badge bg-success"
+                                        >
+                                            Ảnh chính
+                                        </span>
+
+                                    <?php else: ?>
+
+                                        <button
+                                            type="submit"
+                                            class="btn btn-outline-primary btn-sm"
+                                            name="set_primary_image"
+                                            value="<?= $image['ProductImageID'] ?>"
+                                            formaction="/products/edit.php?id=<?= $productID ?>"
+                                            formmethod="post"
+                                        >
+                                            Đặt làm ảnh chính
+                                        </button>
+
+                                    <?php endif; ?>
+
+                                    <button
+                                        type="submit"
+                                        class="btn btn-outline-danger btn-sm ms-2"
+                                        name="delete_image"
+                                        value="<?= $image['ProductImageID'] ?>"
+                                        formaction="/products/edit.php?id=<?= $productID ?>"
+                                        formmethod="post"
+                                        onclick="return confirm('Bạn có chắc muốn xóa ảnh này?');"
+                                    >
+                                        Xóa ảnh
+                                    </button>
+
+                                </div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                <?php endwhile; ?>
+
+            </div>
+        </div>
+        <div class="mb-4">
+            <label
+                for="productImages"
+                class="form-label"
+            >
+                Thêm hình ảnh
+            </label>
+
+            <input
+                type="file"
+                class="form-control"
+                id="productImages"
+                name="product_images[]"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+            >
+
+            <div class="form-text">
+                Có thể chọn nhiều ảnh cùng lúc.
+                Chấp nhận JPG, PNG và WebP.
+            </div>
+             <button
+                type="submit"
+                class="btn btn-outline-success mt-2"
+                name="add_images"
+                value="1"
+                formaction="/products/edit.php?id=<?= $productID ?>"
+                formmethod="post"
+            >
+                Thêm ảnh
+            </button>
+        </div>
+
         <div class="form-check mb-3">
 
             <?php
 
-            $currentIsActive = $_SERVER['REQUEST_METHOD'] === 'POST'
-                ? isset($_POST['is_active'])
-                : ((int) $product['IsActive'] === 1);
+            $currentIsActive =
+                $_SERVER['REQUEST_METHOD'] === 'POST'
+                    ? isset($_POST['is_active'])
+                    : (
+                        (int) $product['IsActive']
+                        === 1
+                    );
 
             ?>
+
 
             <input
                 type="checkbox"
@@ -430,21 +1210,31 @@ require_once '/var/www/src/includes/navbar.php';
                 id="isActive"
                 name="is_active"
                 value="1"
-                <?= $currentIsActive ? 'checked' : '' ?>
+                <?= $currentIsActive
+                    ? 'checked'
+                    : '' ?>
             >
-
-            <label class="form-check-label" for="isActive">
+            <label
+                class="form-check-label"
+                for="isActive"
+            >
                 Đang kinh doanh
             </label>
 
         </div>
 
 
-        <button type="submit" class="btn btn-warning">
+        <button
+            type="submit"
+            class="btn btn-warning"
+        >
             Cập nhật
         </button>
 
-        <a href="/products/" class="btn btn-secondary">
+        <a
+            href="/products/"
+            class="btn btn-secondary"
+        >
             Hủy
         </a>
 
