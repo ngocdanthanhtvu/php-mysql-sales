@@ -1,6 +1,6 @@
 <nav class="navbar navbar-expand-lg bg-dark navbar-dark">
     <div class="container">
-        <a class="navbar-brand" href="/">Sales Management</a>
+        <a class="navbar-brand" href="/admin/">Sales Admin</a>
 
         <button
             class="navbar-toggler"
@@ -15,17 +15,17 @@
             <ul class="navbar-nav">
 
                 <li class="nav-item">
-                    <a class="nav-link" href="/">Trang chủ</a>
+                    <a class="nav-link" href="/admin/">Trang chủ</a>
                 </li>
 
                 <li class="nav-item">
-                    <a class="nav-link" href="/categories/">
+                    <a class="nav-link" href="/admin/categories/">
                         Danh mục
                     </a>
                 </li>
 
                 <li class="nav-item">
-                    <a class="nav-link" href="/products/">
+                    <a class="nav-link" href="/admin/products/">
                         Sản phẩm
                     </a>
                 </li>
@@ -37,7 +37,7 @@
                 </li>
 
                 <li class="nav-item">
-                    <a class="nav-link" href="/shippers/">
+                    <a class="nav-link" href="/admin/shippers/">
                         Người giao hàng
                     </a>
                 </li>

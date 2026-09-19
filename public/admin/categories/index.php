@@ -15,8 +15,8 @@ $sql = "
 
 $result = $conn->query($sql);
 
-require_once '/var/www/src/includes/header.php';
-require_once '/var/www/src/includes/navbar.php';
+require_once '/var/www/src/includes/admin/header.php';
+require_once '/var/www/src/includes/admin/navbar.php';
 
 ?>
 
@@ -26,7 +26,7 @@ require_once '/var/www/src/includes/navbar.php';
 
         <h2>Quản lý danh mục</h2>
 
-        <a href="/categories/create.php" class="btn btn-primary">
+        <a href="/admin/categories/create.php" class="btn btn-primary">
             Thêm danh mục
         </a>
 
@@ -67,13 +67,13 @@ require_once '/var/www/src/includes/navbar.php';
 
                     <td>
 
-                        <a  href="/categories/edit.php?id=<?= $category['CategoryID'] ?>"
+                        <a  href="/admin/categories/edit.php?id=<?= $category['CategoryID'] ?>"
                             class="btn btn-sm btn-warning">
                             Sửa
                         </a>
 
                         <form
-                            action="/categories/delete.php"
+                            action="/admin/categories/delete.php"
                             method="post"
                             class="d-inline"
                             onsubmit="return confirm('Bạn có chắc muốn xóa danh mục này?');"
@@ -108,6 +108,6 @@ require_once '/var/www/src/includes/navbar.php';
 
 <?php
 
-require_once '/var/www/src/includes/footer.php';
+require_once '/var/www/src/includes/admin/footer.php';
 
 $conn->close();

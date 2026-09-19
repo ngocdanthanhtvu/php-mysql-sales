@@ -469,7 +469,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
                     header(
-                        'Location: /products/'
+                        'Location: /admin/products/'
                     );
 
                     exit;
@@ -511,10 +511,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
 require_once
-    '/var/www/src/includes/header.php';
+    '/var/www/src/includes/admin/header.php';
 
 require_once
-    '/var/www/src/includes/navbar.php';
+    '/var/www/src/includes/admin/navbar.php';
 
 ?>
 
@@ -861,7 +861,7 @@ require_once
         </button>
 
         <a
-            href="/products/"
+            href="/admin/products/"
             class="btn btn-secondary"
         >
             Hủy
@@ -874,6 +874,6 @@ require_once
 <?php
 
 require_once
-    '/var/www/src/includes/footer.php';
+    '/var/www/src/includes/admin/footer.php';
 
 $conn->close();
