@@ -1,18 +1,46 @@
 <?php
-$appName = "Hệ thống quản lý bán hàng";
+
+$pageTitle = 'Trang chủ';
+
+require_once '/var/www/src/includes/frontend/header.php';
+require_once '/var/www/src/includes/frontend/navbar.php';
 ?>
 
-<!doctype html>
-<html lang="vi">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><?= $appName ?></title>
-</head>
-<body>
+<main>
+    <section class="py-5 bg-light">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-lg-7">
+                    <h1 class="display-5 fw-bold">
+                        Chào mừng đến với Sales Store
+                    </h1>
 
-    <h1><?= $appName ?></h1>
-    <p>Ứng dụng PHP đang hoạt động.</p>
+                    <p class="lead text-muted">
+                        Khám phá các sản phẩm đang có tại cửa hàng.
+                    </p>
 
-</body>
-</html>
+                    <a
+                        href="/products.php"
+                        class="btn btn-primary"
+                    >
+                        Xem sản phẩm
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="container py-5">
+        <h2 class="mb-3">
+            Sản phẩm nổi bật
+        </h2>
+
+        <p class="text-muted">
+            Danh sách sản phẩm sẽ được hiển thị tại đây
+            trong bước tiếp theo.
+        </p>
+    </section>
+</main>
+
+<?php
+require_once '/var/www/src/includes/frontend/footer.php';
