@@ -12,10 +12,84 @@ if (empty($cart)) {
     exit;
 }
 
+$isLoggedIn = isset($_SESSION['customer_id']);
+
+$customerID = null;
 $customerName = '';
+$email = '';
 $phone = '';
 $address = '';
 $errorMessage = '';
+
+
+/*
+ * Nếu khách hàng đã đăng nhập,
+ * đọc thông tin mới nhất từ database.
+ */
+if ($isLoggedIn) {
+
+    $customerID =
+        (int) $_SESSION['customer_id'];
+
+    $sqlCustomerAccount = "
+        SELECT
+            CustomerID,
+            CustomerName,
+            Email,
+            Phone,
+            Address
+        FROM customers
+        WHERE CustomerID = ?
+          AND Email IS NOT NULL
+    ";
+
+    $stmtCustomerAccount =
+        $conn->prepare($sqlCustomerAccount);
+
+    $stmtCustomerAccount->bind_param(
+        'i',
+        $customerID
+    );
+
+    $stmtCustomerAccount->execute();
+
+    $customerResult =
+        $stmtCustomerAccount->get_result();
+
+    $customer =
+        $customerResult->fetch_assoc();
+
+    $customerResult->free();
+    $stmtCustomerAccount->close();
+
+    /*
+     * Session không còn tương ứng với
+     * một tài khoản hợp lệ.
+     */
+    if (!$customer) {
+
+        unset(
+            $_SESSION['customer_id'],
+            $_SESSION['customer_name']
+        );
+
+        header('Location: /login.php');
+        exit;
+    }
+
+    $customerName =
+        $customer['CustomerName'];
+
+    $email =
+        $customer['Email'] ?? '';
+
+    $phone =
+        $customer['Phone'] ?? '';
+
+    $address =
+        $customer['Address'] ?? '';
+}
+
 
 /*
  * Đọc lại dữ liệu sản phẩm từ database.
@@ -91,6 +165,7 @@ function getCartItems($conn, $cart)
     ];
 }
 
+
 $cartData = getCartItems(
     $conn,
     $cart
@@ -111,14 +186,30 @@ if (empty($cartItems)) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
     && isset($_POST['place_order'])) {
 
-    $customerName =
-        trim($_POST['customer_name'] ?? '');
+    /*
+     * Khách đã đăng nhập:
+     * tên và email lấy từ tài khoản,
+     * không lấy từ dữ liệu POST.
+     */
+    if ($isLoggedIn) {
 
-    $phone =
-        trim($_POST['phone'] ?? '');
+        $phone =
+            trim($_POST['phone'] ?? '');
 
-    $address =
-        trim($_POST['address'] ?? '');
+        $address =
+            trim($_POST['address'] ?? '');
+
+    } else {
+
+        $customerName =
+            trim($_POST['customer_name'] ?? '');
+
+        $phone =
+            trim($_POST['phone'] ?? '');
+
+        $address =
+            trim($_POST['address'] ?? '');
+    }
 
     if ($customerName === ''
         || $phone === ''
@@ -135,8 +226,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
             /*
              * 1. Kiểm tra lại sản phẩm và tồn kho.
-             * FOR UPDATE khóa các mẩu tin sản phẩm
-             * trong thời gian xử lý đơn hàng.
              */
             $orderItems = [];
             $orderTotal = 0;
@@ -227,33 +316,104 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
 
             /*
-             * 2. Tạo khách hàng.
+             * 2. Xác định khách hàng.
              */
-            $sqlCustomer = "
-                INSERT INTO customers (
-                    CustomerName,
-                    Address,
-                    Phone
-                )
-                VALUES (?, ?, ?)
-            ";
+            if ($isLoggedIn) {
 
-            $stmtCustomer =
-                $conn->prepare($sqlCustomer);
+                /*
+                 * Khóa tài khoản khách hàng và
+                 * kiểm tra lại trong transaction.
+                 */
+                $sqlAccount = "
+                    SELECT CustomerID
+                    FROM customers
+                    WHERE CustomerID = ?
+                      AND Email IS NOT NULL
+                    FOR UPDATE
+                ";
 
-            $stmtCustomer->bind_param(
-                'sss',
-                $customerName,
-                $address,
-                $phone
-            );
+                $stmtAccount =
+                    $conn->prepare($sqlAccount);
 
-            $stmtCustomer->execute();
+                $stmtAccount->bind_param(
+                    'i',
+                    $customerID
+                );
 
-            $customerID =
-                $conn->insert_id;
+                $stmtAccount->execute();
 
-            $stmtCustomer->close();
+                $accountResult =
+                    $stmtAccount->get_result();
+
+                $account =
+                    $accountResult->fetch_assoc();
+
+                $accountResult->free();
+                $stmtAccount->close();
+
+                if (!$account) {
+                    throw new Exception(
+                        'Tài khoản khách hàng không còn hợp lệ.'
+                    );
+                }
+
+                /*
+                 * Cập nhật thông tin giao nhận
+                 * cho tài khoản hiện tại.
+                 */
+                $sqlUpdateCustomer = "
+                    UPDATE customers
+                    SET
+                        Phone = ?,
+                        Address = ?
+                    WHERE CustomerID = ?
+                ";
+
+                $stmtUpdateCustomer =
+                    $conn->prepare($sqlUpdateCustomer);
+
+                $stmtUpdateCustomer->bind_param(
+                    'ssi',
+                    $phone,
+                    $address,
+                    $customerID
+                );
+
+                $stmtUpdateCustomer->execute();
+                $stmtUpdateCustomer->close();
+
+            } else {
+
+                /*
+                 * Khách vãng lai:
+                 * tạo một customer mới.
+                 */
+                $sqlCustomer = "
+                    INSERT INTO customers (
+                        CustomerName,
+                        Address,
+                        Phone
+                    )
+                    VALUES (?, ?, ?)
+                ";
+
+                $stmtCustomer =
+                    $conn->prepare($sqlCustomer);
+
+                $stmtCustomer->bind_param(
+                    'sss',
+                    $customerName,
+                    $address,
+                    $phone
+                );
+
+                $stmtCustomer->execute();
+
+                $customerID =
+                    $conn->insert_id;
+
+                $stmtCustomer->close();
+            }
 
 
             /*
@@ -340,7 +500,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
                 $stmtDetail->execute();
 
-
                 $stmtStock->bind_param(
                     'ii',
                     $quantity,
@@ -359,9 +518,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
              */
             $conn->commit();
 
-
             /*
-             * Chỉ xóa giỏ hàng sau khi COMMIT thành công.
+             * Chỉ xóa giỏ hàng sau khi
+             * COMMIT thành công.
              */
             $_SESSION['cart'] = [];
 
@@ -411,27 +570,68 @@ require_once '/var/www/src/includes/frontend/navbar.php';
                 action="/checkout.php"
             >
 
-                <div class="mb-3">
+                <?php if ($isLoggedIn): ?>
 
-                    <label
-                        for="customer_name"
-                        class="form-label"
-                    >
-                        Họ và tên
-                    </label>
+                    <div class="mb-3">
 
-                    <input
-                        type="text"
-                        class="form-control"
-                        id="customer_name"
-                        name="customer_name"
-                        value="<?=
-                            htmlspecialchars($customerName)
-                        ?>"
-                        required
-                    >
+                        <label class="form-label">
+                            Họ và tên
+                        </label>
 
-                </div>
+                        <input
+                            type="text"
+                            class="form-control"
+                            value="<?= htmlspecialchars(
+                                $customerName
+                            ) ?>"
+                            readonly
+                        >
+
+                    </div>
+
+                    <div class="mb-3">
+
+                        <label class="form-label">
+                            Email
+                        </label>
+
+                        <input
+                            type="email"
+                            class="form-control"
+                            value="<?= htmlspecialchars(
+                                $email
+                            ) ?>"
+                            readonly
+                        >
+
+                    </div>
+
+                <?php else: ?>
+
+                    <div class="mb-3">
+
+                        <label
+                            for="customer_name"
+                            class="form-label"
+                        >
+                            Họ và tên
+                        </label>
+
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="customer_name"
+                            name="customer_name"
+                            value="<?= htmlspecialchars(
+                                $customerName
+                            ) ?>"
+                            required
+                        >
+
+                    </div>
+
+                <?php endif; ?>
+
 
                 <div class="mb-3">
 
@@ -447,13 +647,12 @@ require_once '/var/www/src/includes/frontend/navbar.php';
                         class="form-control"
                         id="phone"
                         name="phone"
-                        value="<?=
-                            htmlspecialchars($phone)
-                        ?>"
+                        value="<?= htmlspecialchars($phone) ?>"
                         required
                     >
 
                 </div>
+
 
                 <div class="mb-3">
 
@@ -473,6 +672,7 @@ require_once '/var/www/src/includes/frontend/navbar.php';
                     ><?= htmlspecialchars($address) ?></textarea>
 
                 </div>
+
 
                 <button
                     type="submit"
@@ -607,4 +807,4 @@ require_once '/var/www/src/includes/frontend/navbar.php';
 
 require_once '/var/www/src/includes/frontend/footer.php';
 
-?>
+$conn->close();

@@ -45,7 +45,10 @@ CREATE TABLE customers (
     City VARCHAR(100),
     PostalCode VARCHAR(20),
     Country VARCHAR(100),
-    Phone VARCHAR(20)
+    Phone VARCHAR(20),
+    Email VARCHAR(255) NULL,
+    PasswordHash VARCHAR(255) NULL,
+    CONSTRAINT uq_customers_email UNIQUE (Email)
 ) CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
