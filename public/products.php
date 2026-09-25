@@ -1,5 +1,6 @@
 <?php
 
+require_once '/var/www/src/config/session.php';
 require_once '/var/www/src/config/database.php';
 
 /*

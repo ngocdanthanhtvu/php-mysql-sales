@@ -1,16 +1,24 @@
 <?php
 
+require_once '/var/www/src/config/session.php';
+
 $pageTitle = 'Trang chủ';
 
 require_once '/var/www/src/includes/frontend/header.php';
 require_once '/var/www/src/includes/frontend/navbar.php';
+
 ?>
 
 <main>
+
     <section class="py-5 bg-light">
+
         <div class="container">
+
             <div class="row align-items-center">
+
                 <div class="col-lg-7">
+
                     <h1 class="display-5 fw-bold">
                         Chào mừng đến với Sales Store
                     </h1>
@@ -25,12 +33,17 @@ require_once '/var/www/src/includes/frontend/navbar.php';
                     >
                         Xem sản phẩm
                     </a>
+
                 </div>
+
             </div>
+
         </div>
+
     </section>
 
     <section class="container py-5">
+
         <h2 class="mb-3">
             Sản phẩm nổi bật
         </h2>
@@ -39,8 +52,11 @@ require_once '/var/www/src/includes/frontend/navbar.php';
             Danh sách sản phẩm sẽ được hiển thị tại đây
             trong bước tiếp theo.
         </p>
+
     </section>
+
 </main>
 
 <?php
+
 require_once '/var/www/src/includes/frontend/footer.php';
